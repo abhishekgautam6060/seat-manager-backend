@@ -12,11 +12,16 @@ import com.library.seatmanager.repository.AdminRepository;
 import com.library.seatmanager.repository.LibraryRepository;
 import com.library.seatmanager.repository.SeatRepository;
 import com.library.seatmanager.repository.StudentRepository;
+import jakarta.servlet.http.HttpServletResponse;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -335,5 +340,158 @@ public List<StudentTableResponse> searchStudents( Authentication auth,
         return list.stream()
                 .map(HalfDayStudentResponse::from)
                 .toList();
+    }
+
+
+
+    @GetMapping("/export")
+    public void exportExcel(HttpServletResponse response) throws IOException {
+
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition", "attachment; filename=students.xlsx");
+
+        List<Student> students = studentRepo.findAll();
+
+        Workbook workbook = new XSSFWorkbook();
+        Sheet sheet = workbook.createSheet("Students");
+
+        Row header = sheet.createRow(0);
+        header.createCell(0).setCellValue("Name");
+        header.createCell(1).setCellValue("Phone");
+        header.createCell(2).setCellValue("Seat");
+        header.createCell(3).setCellValue("EndDate");
+
+        int rowCount = 1;
+
+        for (Student s : students) {
+            Row row = sheet.createRow(rowCount++);
+            row.createCell(0).setCellValue(s.getName());
+            row.createCell(1).setCellValue(s.getPhone());
+            row.createCell(2).setCellValue(s.getSeatNumber());
+            row.createCell(3).setCellValue(s.getEndDate().toString());
+        }
+
+        workbook.write(response.getOutputStream());
+        workbook.close();
+    }
+
+    @PostMapping("/import/library/{libraryId}")
+    public ResponseEntity<String> importExcel(Authentication auth, @PathVariable Long libraryId,
+                                              @RequestParam("file") MultipartFile file) {
+
+        String p = auth.getName();
+        Admin admin = adminRepo.findByPhone(p)
+                .orElseThrow(() -> new RuntimeException("Admin not found"));
+
+        try {
+            Workbook workbook = new XSSFWorkbook(file.getInputStream());
+            Sheet sheet = workbook.getSheetAt(0);
+
+            Library library = libraryRepo.findById(libraryId)
+                    .orElseThrow(() -> new RuntimeException("Library not found"));
+
+            for (Row row : sheet) {
+
+                if (row.getRowNum() == 0) continue;
+
+                // ✅ SAFE READ METHODS
+                String name = getString(row.getCell(0));
+                String phone = getString(row.getCell(1));
+
+                int seatNumber = getInt(row.getCell(2));
+                int amountPaid = getInt(row.getCell(3));
+
+                LocalDate bookingDate = getLocalDate(row.getCell(4));
+                LocalDate expiryDate = getLocalDate(row.getCell(5));
+
+                LocalDateTime endDate = getLocalDateTime(row.getCell(6));
+
+                String studentTypeStr = getString(row.getCell(7));
+
+                // ✅ ENUM SAFE CONVERSION
+                Student.StudentType studentType;
+                try {
+                    studentType = Student.StudentType.valueOf(studentTypeStr.trim().toUpperCase());
+                } catch (Exception e) {
+                    System.out.println("Invalid studentType at row: " + row.getRowNum());
+                    continue; // skip bad row
+                }
+
+                // 1️⃣ Find seat by library + seat number
+                Seat seat = seatRepo
+                        .findByLibraryIdAndSeatNumber(libraryId, seatNumber)
+                        .orElseThrow(() -> new RuntimeException("Seat not found for this library"));
+
+                // ✅ CREATE STUDENT
+                Student student = new Student();
+                student.setName(name);
+                student.setPhone(phone);
+                student.setSeatNumber(seatNumber);
+                student.setAmountPaid(amountPaid);
+
+                student.setBookingDate(bookingDate);
+                student.setExpiryDate(expiryDate);
+                student.setEndDate(endDate);
+
+                student.setStudentType(studentType);
+                student.setSeat(seat);
+
+                // 🔥 DEFAULTS
+                student.setActive(true);
+                student.setAmount(amountPaid);
+                student.setLibrary(library);
+
+                studentRepo.save(student);
+            }
+
+            workbook.close();
+            return ResponseEntity.ok("Import Successful");
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(500).body("Import Failed: " + e.getMessage());
+        }
+    }
+
+    private String getString(Cell cell) {
+        if (cell == null) return "";
+
+        if (cell.getCellType() == CellType.STRING) {
+            return cell.getStringCellValue();
+        } else if (cell.getCellType() == CellType.NUMERIC) {
+            return String.valueOf((long) cell.getNumericCellValue());
+        }
+        return "";
+    }
+
+    private int getInt(Cell cell) {
+        if (cell == null) return 0;
+
+        if (cell.getCellType() == CellType.NUMERIC) {
+            return (int) cell.getNumericCellValue();
+        } else if (cell.getCellType() == CellType.STRING) {
+            return Integer.parseInt(cell.getStringCellValue());
+        }
+        return 0;
+    }
+
+    private LocalDate getLocalDate(Cell cell) {
+        if (cell == null) return null;
+
+        if (cell.getCellType() == CellType.NUMERIC) {
+            return cell.getLocalDateTimeCellValue().toLocalDate();
+        } else {
+            return LocalDate.parse(cell.getStringCellValue());
+        }
+    }
+
+    private LocalDateTime getLocalDateTime(Cell cell) {
+        if (cell == null) return null;
+
+        if (cell.getCellType() == CellType.NUMERIC) {
+            return cell.getLocalDateTimeCellValue();
+        } else {
+            return LocalDateTime.parse(cell.getStringCellValue().replace(" ", "T"));
+        }
     }
 }
