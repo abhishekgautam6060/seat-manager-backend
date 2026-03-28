@@ -10,8 +10,10 @@ import com.library.seatmanager.repository.SeatRepository;
 import com.library.seatmanager.repository.StudentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,17 +57,51 @@ public class SeatController {
         }
         return result;
     }
+//
+//    @GetMapping("/library/{libraryId}")
+//    public List<SeatStatusDTO> getSeatsByLibrary(
+//            @PathVariable Long libraryId,
+//            Authentication auth) {
+//
+//        Library lib = libraryRepo.findById(libraryId)
+//                .orElseThrow();
+//
+//        if (!lib.getAdmin().getPhone().equals(auth.getName())) {
+//            throw new RuntimeException("Unauthorized");
+//        }
+//
+//        List<Seat> seats = seatRepo.findByLibraryIdOrderBySeatNumberAsc(libraryId);
+//
+//        List<SeatStatusDTO> result = new ArrayList<>();
+//
+//        for (Seat seat : seats) {
+//            boolean occupied = studentRepo
+//                    .findBySeat_Library_IdAndSeat_SeatNumberAndActiveTrue(
+//                            libraryId,
+//                            seat.getSeatNumber()
+//                    )
+//                    .isPresent();
+//
+//            result.add(new SeatStatusDTO(seat.getSeatNumber(), occupied));
+//        }
+//
+//        return result;
+//    }
 
     @GetMapping("/library/{libraryId}")
     public List<SeatStatusDTO> getSeatsByLibrary(
             @PathVariable Long libraryId,
             Authentication auth) {
 
+        if (auth == null || auth.getName() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No auth");
+        }
+
         Library lib = libraryRepo.findById(libraryId)
                 .orElseThrow();
 
         if (!lib.getAdmin().getPhone().equals(auth.getName())) {
-            throw new RuntimeException("Unauthorized");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Unauthorized");
         }
 
         List<Seat> seats = seatRepo.findByLibraryIdOrderBySeatNumberAsc(libraryId);
