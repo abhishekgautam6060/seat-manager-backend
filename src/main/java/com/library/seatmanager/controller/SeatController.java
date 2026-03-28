@@ -109,12 +109,20 @@ public class SeatController {
         List<SeatStatusDTO> result = new ArrayList<>();
 
         for (Seat seat : seats) {
-            boolean occupied = studentRepo
-                    .findBySeat_Library_IdAndSeat_SeatNumberAndActiveTrue(
-                            libraryId,
-                            seat.getSeatNumber()
-                    )
-                    .isPresent();
+
+            boolean occupied = false;
+
+            try {
+                occupied = studentRepo
+                        .findBySeat_Library_IdAndSeat_SeatNumberAndActiveTrue(
+                                libraryId,
+                                seat.getSeatNumber()
+                        )
+                        .isPresent();
+            } catch (Exception e) {
+                System.out.println("Error checking seat: " + seat.getSeatNumber());
+                e.printStackTrace();
+            }
 
             result.add(new SeatStatusDTO(seat.getSeatNumber(), occupied));
         }
